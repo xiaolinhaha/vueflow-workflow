@@ -1,0 +1,38 @@
+{
+  "name": "workflow-browser-nodes",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "workflow-node-executor": "workspace:*",
+    "lodash-es": "^4.17.21",
+    "sucrase": "^3.35.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "~5.9.3"
+  },
+  "files": [
+    "dist"
+  ]
+}

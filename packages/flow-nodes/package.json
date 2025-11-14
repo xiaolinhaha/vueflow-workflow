@@ -1,0 +1,54 @@
+{
+  "name": "workflow-flow-nodes",
+  "version": "0.1.7",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./server": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/server/index.ts",
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/server/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/server/index.cjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "pnpm run build:main && pnpm run build:server",
+    "build:main": "vite build",
+    "build:server": "vite build --config vite.config.server.ts",
+    "dev": "vite build --watch",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "~5.9.3",
+    "vite": "^6.0.11",
+    "vite-plugin-dts": "^4.5.4"
+  },
+  "files": [
+    "dist"
+  ]
+}

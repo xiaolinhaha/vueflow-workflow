@@ -1,0 +1,447 @@
+<template>
+  <transition name="menu-fade">
+    <n-card
+      v-if="visible"
+      ref="menuRef"
+      tabindex="-1"
+      @keydown="handleCardKeydown"
+      class="absolute outline-none shadow-2xl quick-node-menu"
+      :style="menuStyle"
+      size="small"
+      :bordered="false"
+      :content-style="{ padding: 0 }"
+      :header-style="{ padding: '8px 12px' }"
+      :footer-style="{ padding: '8px 12px' }"
+      style="width: 260px"
+    >
+      <!-- 固定顶部搜索区 -->
+      <template #header>
+        <n-input
+          ref="inputRef"
+          v-model:value="searchKeyword"
+          placeholder="搜索节点..."
+          clearable
+          size="small"
+          @keydown="handleInputKeydown"
+        >
+          <template #prefix>
+            <n-icon :component="SearchOutline" :size="16" />
+          </template>
+        </n-input>
+      </template>
+
+      <!-- 可滚动节点列表区 -->
+      <n-scrollbar ref="scrollbarRef" style="max-height: 280px">
+        <div ref="nodeListContainerRef" style="padding: 8px 4px">
+          <n-text
+            depth="3"
+            style="
+              font-size: 11px;
+              padding-left: 8px;
+              display: block;
+              margin-bottom: 4px;
+              font-weight: 600;
+            "
+          >
+            快捷添加节点
+          </n-text>
+
+          <template v-if="filteredNodes.length > 0">
+            <div class="node-list">
+              <div
+                v-for="(node, index) in filteredNodes"
+                :key="node.id"
+                :ref="(el) => setItemRef(el, index)"
+                class="node-item"
+                :class="{ 'node-item-selected': selectedIndex === index }"
+                @click="handleNodeSelect(node)"
+              >
+                <n-icon :component="node.icon" :color="node.color" :size="16" />
+                <div class="node-content">
+                  <div class="node-name">{{ node.name }}</div>
+                  <div class="node-desc">{{ node.description }}</div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <n-empty
+            v-else
+            description="未找到匹配的节点"
+            size="small"
+            class="py-6"
+          />
+        </div>
+      </n-scrollbar>
+
+      <!-- 底部提示 -->
+      <template #footer>
+        <n-text depth="3" style="font-size: 10px; line-height: 1.4">
+          按 ↑↓ 切换，Enter 选择，Esc 关闭
+        </n-text>
+      </template>
+    </n-card>
+  </transition>
+</template>
+
+<script setup lang="ts">
+import {
+  ref,
+  computed,
+  watch,
+  nextTick,
+  markRaw,
+  type Component,
+  onBeforeUpdate,
+} from "vue";
+import { onClickOutside } from "@vueuse/core";
+import { NCard, NInput, NIcon, NScrollbar, NText, NEmpty } from "naive-ui";
+import { SearchOutline } from "@vicons/ionicons5";
+import { match, pinyin } from "pinyin-pro";
+import IconCode from "@/icons/IconCode.vue";
+import IconWidget from "@/icons/IconWidget.vue";
+import IconServer from "@/icons/IconServer.vue";
+import IconSettings from "@/icons/IconSettings.vue";
+import { useCanvasStore } from "@/v2/stores/canvas";
+import type { NodeMetadataItem } from "@/v2/features/vueflow/executor/types";
+
+interface NodeInfo {
+  id: string;
+  name: string;
+  description: string;
+  icon: Component;
+  color: string;
+}
+
+interface Props {
+  visible: boolean;
+  position: { x: number; y: number };
+  /** 拖拽连接线的开始端口（由外部传入，用于在选择节点时回传） */
+  startHandle?: { nodeId: string; handleId?: string | null; handleType?: "source" | "target" };
+}
+
+const props = defineProps<Props>();
+const emit = defineEmits<{
+  (e: "close"): void;
+  (
+    e: "selectNode",
+    payload: {
+      nodeId: string;
+      startHandle?: { nodeId: string; handleId?: string | null; handleType?: "source" | "target" };
+    }
+  ): void;
+}>();
+
+const menuRef = ref<HTMLDivElement | null>(null);
+const inputRef = ref<typeof NInput | null>(null);
+const scrollbarRef = ref<InstanceType<typeof NScrollbar> | null>(null);
+const nodeListContainerRef = ref<HTMLDivElement | null>(null);
+const searchKeyword = ref("");
+const selectedIndex = ref(0);
+const itemRefs = ref<(HTMLDivElement | null)[]>([]);
+
+// Canvas Store
+const canvasStore = useCanvasStore();
+
+// 设置节点项 ref
+function setItemRef(el: any, index: number) {
+  if (el && el instanceof HTMLElement) {
+    itemRefs.value[index] = el as HTMLDivElement;
+  }
+}
+
+// 在更新前清空 refs
+onBeforeUpdate(() => {
+  itemRefs.value = [];
+});
+
+// 分类图标和颜色映射
+const categoryIconMap: Record<string, { icon: Component; color: string }> = {
+  网络: { icon: markRaw(IconWidget), color: "#3b82f6" },
+  数据处理: { icon: markRaw(IconCode), color: "#10b981" },
+  文本工具: { icon: markRaw(IconServer), color: "#f59e0b" },
+  工具: { icon: markRaw(IconSettings), color: "#8b5cf6" },
+};
+
+// 默认图标和颜色
+const defaultIcon = markRaw(IconCode);
+const defaultColor = "#6b7280";
+
+// 将 NodeMetadataItem 转换为 NodeInfo
+function convertNodeMetadataToNodeInfo(node: NodeMetadataItem): NodeInfo {
+  const category = node.category || "其他";
+  const categoryInfo = categoryIconMap[category] || {
+    icon: defaultIcon,
+    color: defaultColor,
+  };
+
+  return {
+    id: node.type,
+    name: node.label,
+    description: node.description || "",
+    icon: categoryInfo.icon,
+    color: categoryInfo.color,
+  };
+}
+
+// 节点列表（从 Store 获取）
+const nodeList = computed<NodeInfo[]>(() => {
+  return canvasStore.availableNodes.map(convertNodeMetadataToNodeInfo);
+});
+
+const menuStyle = computed(() => ({
+  left: `${props.position.x}px`,
+  top: `${props.position.y}px`,
+  zIndex: 1000,
+}));
+
+// 拼音搜索辅助函数
+function matchesPinyin(text: string, keyword: string): boolean {
+  // 1. 直接中文匹配
+  if (text.toLowerCase().includes(keyword.toLowerCase())) {
+    return true;
+  }
+
+  // 2. 使用 pinyin-pro 的 match 函数进行拼音匹配
+  // match 返回匹配的索引数组，如果匹配成功则返回数组，否则返回 null
+  try {
+    const matchResult = match(text, keyword);
+    if (matchResult !== null) {
+      return true;
+    }
+  } catch {
+    // 如果 match 函数出错，继续其他匹配方式
+  }
+
+  // 3. 获取拼音首字母进行匹配
+  try {
+    const firstLetters = pinyin(text, { pattern: 'first', toneType: 'none' });
+    if (firstLetters.toLowerCase().includes(keyword.toLowerCase())) {
+      return true;
+    }
+  } catch {
+    // 如果获取首字母失败，继续
+  }
+
+  return false;
+}
+
+// 过滤节点
+const filteredNodes = computed(() => {
+  let nodes = nodeList.value;
+  
+  // 过滤掉开始节点和结束节点
+  nodes = nodes.filter(node => {
+    return node.id !== 'start' && node.id !== 'end';
+  });
+  
+  if (!searchKeyword.value.trim()) {
+    return nodes;
+  }
+  const keyword = searchKeyword.value.trim();
+  return nodes.filter(
+    (node) =>
+      matchesPinyin(node.name, keyword) ||
+      matchesPinyin(node.description, keyword)
+  );
+});
+
+// 监听 visible 变化，自动聚焦输入框并重置搜索
+watch(
+  () => props.visible,
+  (newVisible) => {
+    if (newVisible) {
+      searchKeyword.value = "";
+      selectedIndex.value = 0;
+      nextTick(() => {
+        inputRef.value?.focus();
+        scrollToSelectedItem();
+      });
+    }
+  }
+);
+
+// 监听过滤后的节点列表变化，重置选中索引
+watch(
+  () => filteredNodes.value,
+  () => {
+    selectedIndex.value = 0;
+    nextTick(() => {
+      scrollToSelectedItem();
+    });
+  }
+);
+
+// 使用 VueUse 的 onClickOutside 检测外部点击
+onClickOutside(menuRef, () => {
+  if (props.visible) {
+    emit("close");
+  }
+});
+
+/**
+ * 处理输入框的键盘事件
+ */
+function handleInputKeydown(event: KeyboardEvent) {
+  switch (event.key) {
+    case "Enter":
+      event.preventDefault();
+      event.stopPropagation();
+      handleEnterSelect();
+      break;
+    case "ArrowDown":
+      event.preventDefault();
+      event.stopPropagation();
+      handleArrowDown();
+      break;
+    case "ArrowUp":
+      event.preventDefault();
+      event.stopPropagation();
+      handleArrowUp();
+      break;
+  }
+}
+
+/**
+ * 处理卡片上的键盘事件
+ */
+function handleCardKeydown(event: KeyboardEvent) {
+  switch (event.key) {
+    case "Escape":
+      event.preventDefault();
+      emit("close");
+      break;
+    case "Enter":
+      event.preventDefault();
+      handleEnterSelect();
+      break;
+    case "ArrowDown":
+      event.preventDefault();
+      handleArrowDown();
+      break;
+    case "ArrowUp":
+      event.preventDefault();
+      handleArrowUp();
+      break;
+  }
+}
+
+function handleNodeSelect(node: NodeInfo) {
+  emit("selectNode", { nodeId: node.id, startHandle: props.startHandle });
+  emit("close");
+}
+
+function handleEnterSelect() {
+  const selectedNode = filteredNodes.value[selectedIndex.value];
+  if (selectedNode) {
+    handleNodeSelect(selectedNode);
+  }
+}
+
+function handleArrowDown() {
+  if (filteredNodes.value.length === 0) return;
+  selectedIndex.value = (selectedIndex.value + 1) % filteredNodes.value.length;
+  scrollToSelectedItem();
+}
+
+function handleArrowUp() {
+  if (filteredNodes.value.length === 0) return;
+  selectedIndex.value =
+    selectedIndex.value === 0
+      ? filteredNodes.value.length - 1
+      : selectedIndex.value - 1;
+  scrollToSelectedItem();
+}
+
+// 滚动到选中的项目
+function scrollToSelectedItem() {
+  nextTick(() => {
+    const selectedItem = itemRefs.value[selectedIndex.value];
+    if (!selectedItem) return;
+
+    try {
+      // 直接使用 scrollIntoView，这是最可靠的跨浏览器方案
+      selectedItem.scrollIntoView({
+        behavior: "auto",
+        block: "nearest",
+      });
+    } catch (error) {
+      // 如果 scrollIntoView 也失败，记录错误
+      console.warn("[QuickNodeMenu] scrollIntoView 失败:", error);
+    }
+  });
+}
+
+defineExpose({
+  focus: () => {
+    inputRef.value?.focus();
+  },
+});
+</script>
+
+<style scoped>
+/* 节点列表样式 */
+.node-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.node-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.node-item:hover {
+  background-color: rgba(24, 160, 88, 0.08);
+}
+
+.node-item-selected {
+  background-color: rgba(24, 160, 88, 0.12) !important;
+}
+
+.node-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.node-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  line-height: 1.4;
+  margin-bottom: 2px;
+}
+
+.node-desc {
+  font-size: 11px;
+  color: #666;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 菜单过渡动画 */
+.menu-fade-enter-active,
+.menu-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.95) translateY(-4px);
+}
+
+.menu-fade-enter-to,
+.menu-fade-leave-from {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+</style>
